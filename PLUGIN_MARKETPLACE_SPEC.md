@@ -3,7 +3,7 @@
 **Project**: Codeframe-Inspired Plugin Marketplace System
 **Built As**: Claude Code Plugin within Marketplace
 **License**: MIT Open Source
-**Last Updated**: 2025-01-29
+**Last Updated**: 2025-10-29
 
 ---
 
@@ -11,17 +11,18 @@
 
 1. [Executive Summary](#executive-summary)
 2. [System Architecture](#system-architecture)
-3. [Concurrent Loop System](#concurrent-loop-system)
-4. [Agent Supervision Model](#agent-supervision-model)
-5. [Workstream Isolation Model](#workstream-isolation-model)
-6. [Plugin System](#plugin-system)
-7. [QC and Vetting System](#qc-and-vetting-system)
-8. [User Interaction Model](#user-interaction-model)
-9. [Persistence and Recovery](#persistence-and-recovery)
-10. [Database Schemas](#database-schemas)
-11. [API Specifications](#api-specifications)
-12. [Phase I MVP Scope](#phase-i-mvp-scope)
-13. [Implementation Roadmap](#implementation-roadmap)
+3. [Claude Code Native Architecture](#claude-code-native-architecture)
+4. [Core Components](#core-components)
+5. [Agent Supervision Model](#agent-supervision-model)
+6. [Workstream Isolation Model](#workstream-isolation-model)
+7. [Plugin System](#plugin-system)
+8. [QC and Vetting System](#qc-and-vetting-system)
+9. [User Interaction Model](#user-interaction-model)
+10. [Persistence and Recovery](#persistence-and-recovery)
+11. [Database Schemas](#database-schemas)
+12. [API Specifications](#api-specifications)
+13. [Phase I MVP Scope](#phase-i-mvp-scope)
+14. [Implementation Roadmap](#implementation-roadmap)
 
 ---
 
@@ -35,9 +36,9 @@ Build a **plugin marketplace system** as a Claude Code plugin that enables auton
 
 1. **Three-Tier Supervision**: Worker → QC Expert → Coordinator pattern ensures consistent quality
 2. **Workstream Isolation**: Git branch-based workspaces prevent resource conflicts between agents
-3. **Concurrent Loop Architecture**: 8 independent loops communicate through coordinator pattern
-4. **Unified Question Queue**: All loops feed into Claude Code's existing user interaction system
-5. **Flash Save Persistence**: Object serialization enables instant checkpoint and recovery
+3. **Claude Code Native Architecture**: Hooks + MCP server replace custom Python loops
+4. **Unified Question Queue**: Native AskUserQuestion tool with MCP resource management
+5. **Continuous Context Pruning**: before_compact hook enables proactive memory management
 6. **Smart Retry-Debug**: Automated retry → simplify → debug → escalate pattern
 
 ### Three-Phase Roadmap
@@ -55,38 +56,47 @@ Build a **plugin marketplace system** as a Claude Code plugin that enables auton
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    USER INTERFACE                                │
-│  CLI: codeframe-marketplace [cmd] / Chat: Loop 8                │
+│  Slash Commands: /qc-review, /chat, /plugin-install            │
 └────────────────────────────┬────────────────────────────────────┘
                              │
               ┌──────────────┴──────────────┐
-              │   Unified Question Queue    │
-              │  (Claude Code Integration)  │
+              │ Claude Code Native Tools     │
+              │  • AskUserQuestion          │
+              │  • Bash + Git               │
+              │  • Skills Framework         │
               └──────────────┬──────────────┘
                              │
 ┌────────────────────────────┴──────────────────────────────────┐
-│                   LOOP COORDINATORS                            │
-│         (Central communication points)                         │
-├────────────┬────────────┬────────────┬───────────┬───────────┤
-│  Coord 1   │  Coord 2   │  Coord 4   │  Coord 6  │  Coord 7  │
-│  (Work)    │ (Context)  │  (Sched)   │  (Inter)  │  (Vet)    │
-└─────┬──────┴──────┬─────┴──────┬─────┴─────┬─────┴─────┬─────┘
-      │             │            │           │           │
-┌─────▼──────┐ ┌───▼─────┐ ┌───▼─────┐ ┌───▼─────┐ ┌──▼──────┐
-│  LOOP 1    │ │ LOOP 2  │ │ LOOP 4  │ │ LOOP 6  │ │ LOOP 7  │
-│  Work      │ │ Context │ │Schedule │ │Interrupt│ │ Vetting │
-│  ALWAYS    │ │ REQUEST │ │ REQUEST │ │ON-DEMAND│ │ON-DEMAND│
-│  RUNNING   │ │ INTAKE  │ │ INTAKE  │ │         │ │         │
-└─────┬──────┘ └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘
-      │             │           │           │           │
-      └─────────────┴───────────┴───────────┴───────────┘
-                             │
-                             ▼
+│                   HOOKS SYSTEM                                 │
+│         (Interception points in Claude Code)                   │
+├────────────┬────────────┬────────────┬───────────────────────┤
+│before_     │after_      │user_prompt_│after_tool_use         │
+│compact     │compact     │submit      │                       │
+└─────┬──────┴──────┬─────┴──────┬─────┴───────────┬──────────┘
+      │             │            │                 │
+      ▼             ▼            ▼                 ▼
+┌───────────────────────────────────────────────────────────────┐
+│         CODEFRAME-COORDINATOR MCP SERVER                       │
+│  • continuous_prune (context management)                       │
+│  • get_next_task (work execution)                             │
+│  • submit_for_qc (QC workflow)                                │
+│  • score_priority (prioritization)                            │
+│  • plugin_discover (plugin recommendations)                   │
+│                                                               │
+│  Resources:                                                   │
+│  • project_state                                              │
+│  • user_input_queue                                           │
+│  • plugin_catalog                                             │
+│  • task_queue                                                 │
+└───────────────────────┬───────────────────────────────────────┘
+                        │
+                        ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                DATABASE MESSAGE BUS                              │
-│  • loop_messages (inter-loop communication)                     │
-│  • user_input_queue (unified questions)                         │
+│                SQLite Database (MCP-Managed)                     │
 │  • workstreams (agent isolation)                                │
 │  • internal_prs (QC workflow)                                   │
+│  • plugin_catalog (marketplace)                                 │
+│  • tasks (work queue)                                           │
 └─────────────────────────────┬───────────────────────────────────┘
                               │
                               ▼
@@ -101,475 +111,329 @@ Build a **plugin marketplace system** as a Claude Code plugin that enables auton
 
 ### Design Principles
 
-1. **Autonomous Operation**: Loops run independently with minimal human oversight
-2. **Consistent Quality**: QC experts develop and apply rubrics consistently
-3. **Isolation**: Workstreams prevent resource conflicts between agents
-4. **Persistence**: Flash save at any moment enables instant recovery
+1. **Claude Code Native**: Build on top of existing infrastructure, not around it
+2. **Hooks Over Loops**: Use interception points instead of concurrent Python processes
+3. **MCP for State**: Single MCP server manages all state and coordination
+4. **Skills for Behavior**: Reusable behavioral patterns instead of hardcoded logic
 5. **User Control**: Configurable autonomy levels (bypass/async/sync interruption)
 6. **Plugin Discovery**: Context-aware plugin recommendations based on workflow phase
 
 ---
 
-## Concurrent Loop System
+## Claude Code Native Architecture
 
-### Loop Overview
+### Philosophy: Build On, Not Around
 
-The system operates through **8 independent concurrent loops**, each with its own coordinator:
+Instead of creating 8 concurrent Python loops that operate alongside Claude Code, we **extend Claude Code from within** using its native extension mechanisms:
 
-| Loop | Name | Type | Trigger | Purpose |
-|------|------|------|---------|---------|
-| 1 | Work Execution | Always Running | System start | Main development workflow |
-| 2 | Context Management | Request Intake | Context >80% | Compaction and tiering |
-| 3 | Health Check | Request Intake | Manual / Timer | Agent timeout detection |
-| 4 | Prioritization | Request Intake | Task complete | Scheduling and bottlenecks |
-| 5 | Plugin Discovery | Request Intake | Phase change | Context-aware recommendations |
-| 6 | Interruption | On-Demand | Decision needed | User input scoring |
-| 7 | Vetting | On-Demand | Plugin submit | Plugin approval workflow |
-| 8 | User Chat | On-Demand | User initiates | "Peek in" interface |
+- **Hooks**: Interception points in Claude Code's execution flow
+- **MCP Server**: Single server managing state, not separate Python processes
+- **Skills**: Reusable behavioral patterns triggered by hooks or commands
+- **Slash Commands**: User-facing interface for marketplace operations
 
-### Loop 1: Work Execution (Always Running)
+This approach:
+- Eliminates need for complex inter-process communication
+- Leverages Claude Code's existing context management
+- Reduces maintenance burden (fewer moving parts)
+- Makes system more reliable (single process)
 
-**Frequency**: Continuous
-**Purpose**: Main development loop - drives entire project
+### Phase I: Single Instance Architecture
+
+In Phase I (MVP), we operate with a **single Claude Code instance** enhanced with:
+
+1. **Hooks** that intercept key execution points
+2. **MCP server** that manages persistent state
+3. **Skills** that define behavioral patterns
+4. **Slash commands** for user interaction
+
+**Phase II** will explore multi-instance coordination, but Phase I proves the concept with simpler architecture.
+
+### Component Overview
+
+| Component | Type | Trigger | Purpose | Implementation |
+|-----------|------|---------|---------|----------------|
+| Context Pruning | Hook + MCP | before_compact | Continuous memory mgmt | `before_compact.js` → `continuous_prune` |
+| Work Execution | Skill + Hook | after_tool_use | Main dev workflow | `/qc-review` skill + hook |
+| QC Review | Skill | Manual/automatic | Code quality gate | `/qc-review` skill |
+| Prioritization | MCP Tool | User prompt | Decision scoring | `score_priority()` |
+| Plugin Discovery | Skill | Phase change | Context-aware plugins | `/plugin-discover` skill |
+| User Questions | Native Tool | Decision needed | User input | `AskUserQuestion` |
+| User Chat | Slash Command | User initiates | "Peek in" interface | `/chat` command |
+| Plugin Vetting | Skill | Plugin submit | Approval workflow | `/plugin-vet` skill |
+
+---
+
+## Core Components
+
+### 1. Work Execution (Skill + Hook)
+
+**Implementation**: `/qc-review` skill triggered by `after_tool_use` hook
+
+**Purpose**: Main development workflow with automatic QC checkpoints
 
 ```
 ┌─────────────────────────────────────────┐
-│  COORDINATOR: Select Next Task          │
-│  • Query ready tasks (dependencies met) │
-│  • Apply priority (P0 > P1 > P2 > P3)  │
-│  • Match task to available worker       │
+│  USER/SYSTEM: Requests work             │
+│  • Manual task assignment               │
+│  • Or: MCP tool get_next_task()        │
 └────────────────┬────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│  CREATE WORKSTREAM:                     │
+│  CREATE WORKSTREAM (via Bash + Git):    │
 │  • Git branch: worker-N/task-X.Y.Z     │
 │  • Isolated workspace directory         │
 └────────────────┬────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│  WORKER: Execute Task                   │
+│  CLAUDE CODE: Execute Task              │
 │  • Work in isolated workspace           │
-│  • Commit changes to branch             │
-│  • "Turn in" to QC Expert              │
+│  • Use native tools (Edit, Write, etc) │
+│  • Commit changes via Bash tool         │
 └────────────────┬────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│  QC EXPERT: Review Work                 │
-│  • Checkout worker's branch             │
+│  HOOK: after_tool_use triggers          │
+│  • Detect: git commit completed         │
+│  • Auto-invoke: /qc-review skill       │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
+│  SKILL: /qc-review                      │
 │  • Apply quantitative checks            │
 │  • Apply qualitative scoring            │
 │  • Verdict: Pass / Conditional / Fail   │
+│  • Call MCP: submit_for_qc()           │
 └────────────────┬────────────────────────┘
                  │
        ┌─────────┴─────────┐
        │ PASS              │ FAIL
        ▼                   ▼
 ┌─────────────┐      ┌──────────────┐
-│Submit to    │      │Request changes│
-│Coordinator  │      │Worker fixes   │
+│Merge via    │      │Request changes│
+│Bash tool    │      │Edit and retry │
 └──────┬──────┘      └──────┬───────┘
        │                    │
        ▼                    │
 ┌─────────────────────────────┐
-│  COORDINATOR: Final Review   │
-│  • Approve or call "stop"   │
-│  • Merge branch → main      │
-│  • Update task status       │
-│  • Cleanup workstream       │
-│  • Flash save               │
-└────────────────┬────────────┘
-                 │
-                 ▼
-          ┌──────────┐
-          │  REPEAT  │
-          └──────────┘
+│  Update MCP State:           │
+│  • Mark task complete        │
+│  • Update workstream status  │
+│  • Cleanup branch (optional) │
+└─────────────────────────────┘
 ```
 
-**Key Checkpoints**:
-- Worker timeout (>5 min) → QC/Coordinator intervenes
-- QC deadlock → Coordinator veto power
-- P0 detected → Immediate sync interruption (breaks loop)
+**Key Features**:
+- No separate Python loop process
+- Uses native Claude Code Bash tool for git operations
+- after_tool_use hook automatically triggers QC when appropriate
+- MCP tools manage state transitions
 
-### Loop 2: Context Management (Request Intake)
+### 2. Context Management (Hook + MCP)
 
-**Trigger**: Context window >80% full
-**Purpose**: Importance-based compaction and tiering
+**Implementation**: `before_compact.js` hook → `continuous_prune` MCP tool
 
-**IMPORTANT DISTINCTION**:
-- **Flash Save** = Emergency backup of FULL context (120K+ tokens) → Only used for crash recovery
-- **Compaction** = Selective reload with ONLY HOT tier (~20-30% of original context)
-- **New conversation starts at ~20-30% capacity, NOT 80%**
+**Purpose**: Continuous importance-based context pruning
+
+**Key Difference from Traditional Compaction**:
+- **Traditional**: Wait until 80% full, then batch compact
+- **Continuous Pruning**: Prune incrementally on every message cycle
+- Prevents context from ever reaching critical levels
+- More efficient: small pruning operations vs. large batch operations
+
+**Algorithm Testing**: The continuous pruning algorithm is being developed and validated in a standalone repository: **context-pruning-lab**. See that project for algorithm experiments, benchmarks, and validation tests.
 
 ```
 ┌─────────────────────────────────────────┐
-│  TRIGGER: Context >80% Full             │
+│  HOOK: before_compact (every cycle)     │
+│  • Triggered BEFORE Claude compacts    │
+│  • Allows proactive intervention        │
 └────────────────┬────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│  FLASH SAVE: Emergency Backup ONLY      │
-│  • Save FULL conversation (120K tokens) │
-│  • Git commit current work              │
-│  • DB snapshot                          │
-│  • NOT restored in normal operation     │
-│  • Only for crash recovery              │
+│  MCP TOOL: continuous_prune()           │
+│  • Calculate importance scores          │
+│  • Identify lowest-value items          │
+│  • Archive to MCP resource              │
+│  • Return pruned context                │
 └────────────────┬────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────┐
 │  IMPORTANCE SCORING:                    │
-│  • Calculate recency score              │
-│  • Calculate access frequency           │
-│  • Apply type weights                   │
+│  • Recency: More recent = higher       │
+│  • Frequency: More accessed = higher   │
+│  • Type weights: Task > File > Test    │
 │  • Final score: 0.0-1.0                │
 └────────────────┬────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│  TIER ASSIGNMENT:                       │
-│  • HOT (0.8-1.0): Active context       │
-│  • WARM (0.4-0.8): Queryable archive   │
-│  • COLD (0.0-0.4): Long-term storage   │
+│  ARCHIVE LOW-VALUE ITEMS:               │
+│  • Store in MCP resource (queryable)   │
+│  • Remove from active context           │
+│  • Update access metadata               │
 └────────────────┬────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│  COMPACTION: Start NEW Conversation     │
-│  • Load ONLY HOT tier (~40K tokens)    │
-│  • Archive WARM tier to DB (queryable) │
-│  • Archive COLD tier to filesystem     │
-│  • Start fresh conversation at ~27%    │
-│  • 73% capacity available for growth   │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-          ┌──────────┐
-          │  RESUME  │
-          └──────────┘
+│  CLAUDE CODE: Continue with pruned      │
+│  context, never hitting critical levels │
+└─────────────────────────────────────────┘
 ```
 
-### Compaction Example: Token Counts
+**Benefits**:
+- No emergency flash saves needed
+- Context stays lean continuously
+- MCP resources provide queryable archive
+- Algorithm development separate from integration (context-pruning-lab repo)
 
-This example demonstrates the context reduction process when compaction is triggered at 80% capacity (assuming a 150K token limit).
+### 3. Prioritization (MCP Tool)
 
-**Before Compaction (80% full - 120,000 tokens):**
+**Implementation**: `score_priority()` MCP tool called by `user_prompt_submit.js` hook
 
-| Context Item | Tokens | Importance Score | Tier Assignment |
-|-------------|--------|------------------|-----------------|
-| Current task spec | 10,000 | 0.95 | HOT (stays in context) |
-| Active files (3) | 20,000 | 0.90 | HOT (stays in context) |
-| Recent test results | 10,000 | 0.85 | HOT (stays in context) |
-| Related files (10) | 30,000 | 0.60 | WARM (archived to DB) |
-| Old test results | 30,000 | 0.30 | COLD (archived to filesystem) |
-| Completed tasks | 20,000 | 0.20 | COLD (archived to filesystem) |
-| **TOTAL** | **120,000** | - | - |
+**Purpose**: Automatic priority scoring for decisions
 
-**After Compaction (27% full - 40,000 tokens):**
-
-| Context Item | Tokens | Status | Location |
-|-------------|--------|--------|----------|
-| Current task spec | 10,000 | ✅ Loaded | New conversation |
-| Active files (3) | 20,000 | ✅ Loaded | New conversation |
-| Recent test results | 10,000 | ✅ Loaded | New conversation |
-| Related files (10) | 30,000 | 📊 Queryable | Database (loaded on-demand) |
-| Old test results | 30,000 | 📁 Archived | Filesystem (rarely accessed) |
-| Completed tasks | 20,000 | 📁 Archived | Filesystem (rarely accessed) |
-| **HOT TIER TOTAL** | **40,000** | - | **In active context** |
-| **WARM TIER TOTAL** | **30,000** | - | **Available via DB query** |
-| **COLD TIER TOTAL** | **50,000** | - | **Long-term storage** |
-
-**Result**: Context reduced from 120K (80%) to 40K (27%), leaving **73% capacity available** for new work.
-
-**Hot Tier Selection Algorithm:**
-
-```python
-def select_hot_tier(context_items: List[ContextItem],
-                    target_tokens: int = 40000) -> List[ContextItem]:
-    """
-    Select the most important context items to keep in active memory.
-
-    Args:
-        context_items: All items in current context
-        target_tokens: Target token count for HOT tier (~25-30% of max)
-
-    Returns:
-        List of items to keep in HOT tier
-    """
-    # Calculate importance scores for all items
-    for item in context_items:
-        item.importance_score = calculate_importance(item)
-
-    # Sort by importance (descending)
-    sorted_items = sorted(context_items,
-                         key=lambda x: x.importance_score,
-                         reverse=True)
-
-    # Select items until target token count reached
-    hot_tier = []
-    current_tokens = 0
-
-    for item in sorted_items:
-        if current_tokens + item.token_count <= target_tokens:
-            hot_tier.append(item)
-            current_tokens += item.token_count
-        else:
-            # Token budget exceeded - remaining items go to WARM/COLD
-            break
-
-    return hot_tier
-
-def calculate_importance(item: ContextItem) -> float:
-    """
-    Calculate importance score (0.0-1.0) based on multiple factors.
-
-    Score components:
-    - Recency: More recent = higher score (0.0-0.4)
-    - Access frequency: More accesses = higher score (0.0-0.3)
-    - Type weight: Some types inherently more important (0.0-0.3)
-    """
-    # Recency score (exponential decay)
-    age_hours = (datetime.now() - item.last_accessed).total_seconds() / 3600
-    recency_score = 0.4 * math.exp(-age_hours / 24)  # Half-life: 24 hours
-
-    # Access frequency score (logarithmic)
-    frequency_score = 0.3 * min(1.0, math.log(item.access_count + 1) / 5)
-
-    # Type weight score
-    type_weights = {
-        'current_task': 0.30,      # Always highest priority
-        'active_file': 0.25,       # Currently editing
-        'test_result': 0.20,       # Recent test output
-        'completed_task': 0.05,    # Historical only
-        'dependency': 0.15,        # Related files
-        'documentation': 0.10      # Reference material
-    }
-    type_score = type_weights.get(item.type, 0.10)
-
-    # Combine scores
-    total_score = recency_score + frequency_score + type_score
-    return min(1.0, total_score)  # Cap at 1.0
-```
-
-**Tier Thresholds:**
-- **HOT (0.8-1.0)**: Must stay in active context for immediate access
-- **WARM (0.4-0.8)**: Important but can be loaded on-demand from database
-- **COLD (0.0-0.4)**: Historical data, archived to filesystem, rarely needed
-
-**WARM Tier Access Pattern:**
-When an agent needs WARM tier data, the system:
-1. Queries database for specific items by ID or pattern
-2. Loads requested items into temporary context
-3. Updates access count and recency (may promote to HOT on next compaction)
-4. Removes from context after task completion
-
-**COLD Tier Access Pattern:**
-COLD tier data is typically only accessed for:
-- Historical analysis requests
-- Debugging old issues
-- Compliance/audit requirements
-- Manual user requests
-
-### Loop 4: Prioritization & Scheduling (Request Intake)
-
-**Trigger**: Task completion OR every 2 minutes
-**Purpose**: Dependency resolution, bottleneck detection
+**Flow**:
 
 ```
 ┌─────────────────────────────────────────┐
-│  SCAN TASK QUEUE: All Pending Tasks    │
+│  HOOK: user_prompt_submit               │
+│  • Triggered when decision needed       │
+│  • Passes decision context to MCP       │
 └────────────────┬────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│  DEPENDENCY CHECK:                      │
-│  • Filter where predecessors complete   │
-│  • Check circular dependencies          │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│  PRIORITY SCORING:                      │
-│  • P0 (showstopper) → SYNC             │
-│  • P1 (high) → ASYNC                   │
-│  • P2 (medium) → BYPASS                │
-│  • P3 (low) → BYPASS                   │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│  BOTTLENECK DETECTION:                  │
-│  • Count tasks blocked by each task     │
-│  • If blocking ≥ 3 → Flag bottleneck   │
-└────────────────┬────────────────────────┘
-                 │
-       ┌─────────┴─────────┐
-       │ Bottleneck?       │
-       ▼ YES               ▼ NO
-┌─────────────┐      ┌──────────────┐
-│ Rebalance:  │      │ Assign tasks │
-│ • Extra     │      │ to idle      │
-│   worker    │      │ workers      │
-│ • Escalate  │      └──────────────┘
-└─────────────┘
-       │
-       └────────────────┐
-                        ▼
-                 ┌──────────┐
-                 │  REPEAT  │
-                 └──────────┘
-```
-
-### Loop 6: Autonomous Interruption (On-Demand)
-
-**Trigger**: Decision point requiring user input
-**Purpose**: Score autonomy and route to bypass/async/sync
-
-```
-┌─────────────────────────────────────────┐
-│  TRIGGER: Decision Required             │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│  AUTONOMY SCORING:                      │
+│  MCP TOOL: score_priority(decision)     │
 │  • Check P0 pattern database            │
-│  • Check decision reversibility         │
-│  • Check user trust level               │
-│  • Calculate: P0/P1/P2/P3              │
+│  • Analyze decision reversibility       │
+│  • Consider user trust level            │
+│  • Return: P0/P1/P2/P3                 │
 └────────────────┬────────────────────────┘
                  │
        ┌─────────┼─────────┬─────────┐
-       │ P0      │ P1      │ P2      │ P3
-       ▼         ▼         ▼         ▼
-    ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐
-    │SYNC  │ │ASYNC │ │BYPASS│ │LOG   │
-    │Stop  │ │Notify│ │Auto  │ │Only  │
-    │work  │ │user  │ │decide│ │      │
-    └───┬──┘ └───┬──┘ └───┬──┘ └──────┘
-        │        │        │
-        └────────┴────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│  SEND NOTIFICATION:                     │
-│  • Compose with context                 │
-│  • Route to channels (SMS/email/webhook)│
-│  • Log in interruption_log              │
-└────────────────┬────────────────────────┘
-                 │
-       ┌─────────┴─────────┐
-       │ SYNC              │ ASYNC
-       ▼                   ▼
-┌─────────────┐      ┌──────────────┐
-│Block & wait │      │Continue work,│
-│for user     │      │check for     │
-│             │      │response/5min │
-└──────┬──────┘      └──────┬───────┘
-       │                    │
-       └────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│  USER RESPONDS:                         │
-│  • Parse decision                       │
-│  • Update tasks/settings                │
-│  • Log response time                    │
-│  • Update P0 patterns (learning)        │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-          ┌──────────┐
-          │  RESUME  │
-          └──────────┘
+       │ P0      │ P1      │ P2/P3   │
+       ▼         ▼         ▼
+    ┌──────┐ ┌──────┐ ┌──────┐
+    │SYNC  │ │ASYNC │ │BYPASS│
+    │Ask   │ │Notify│ │Auto  │
+    │User  │ │user  │ │decide│
+    └──────┘ └──────┘ └──────┘
 ```
 
-### Loop 8: User Chat Interface (On-Demand)
+**Benefits**:
+- No separate scheduling loop
+- Priority scoring happens inline with decision flow
+- MCP maintains P0 pattern database for learning
+- Native `AskUserQuestion` tool handles UI
 
-**Trigger**: User initiates chat
-**Purpose**: "Peek in" on development team, opportunistic question answering
+### 4. User Interruption (Native Tool + MCP)
+
+**Implementation**: Native `AskUserQuestion` tool + MCP resource `user_input_queue`
+
+**Purpose**: Collect user input when needed, with priority-based routing
+
+**Flow**:
 
 ```
 ┌─────────────────────────────────────────┐
-│  LISTEN: User Initiates Chat            │
-│  • CLI: codeframe chat                  │
-│  • User types question                  │
+│  CLAUDE CODE: Decision Required         │
+│  • Determined by score_priority()       │
+│  • P0/P1: Must ask user                 │
 └────────────────┬────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│  QUERY SYSTEM STATE:                    │
-│  • Active tasks (Loop 1)                │
-│  • Pending questions (Loop 6)           │
-│  • Recent failures                      │
-│  • Context health (Loop 2)              │
-│  • Bottlenecks (Loop 4)                 │
+│  NATIVE TOOL: AskUserQuestion           │
+│  • Claude Code's built-in UI            │
+│  • Presents options to user             │
+│  • Blocks (P0) or continues (P1)       │
 └────────────────┬────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│  GENERATE RESPONSE:                     │
-│  • Natural language summary             │
-│  • Show metrics                         │
-│  • Highlight blockers                   │
+│  MCP RESOURCE: user_input_queue         │
+│  • Stores pending questions             │
+│  • Tracks responses                     │
+│  • Updates P0 patterns (learning)       │
+└─────────────────────────────────────────┘
+```
+
+**Benefits**:
+- Uses Claude Code's native question UI (no custom UI needed)
+- MCP resource provides query interface for pending questions
+- No separate interruption loop process
+- Notification channels integrated via MCP (Phase II)
+
+### 5. User Chat Interface (Slash Command)
+
+**Implementation**: `/chat` slash command
+
+**Purpose**: "Peek in" on development progress
+
+**Flow**:
+
+```
+┌─────────────────────────────────────────┐
+│  USER: Invokes /chat                    │
+│  • Triggers chat skill                  │
 └────────────────┬────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│  OPPORTUNISTIC QUESTIONS:               │
-│  "While you're here, I have 3 questions"│
-│  • Show unified question queue          │
+│  SKILL: Query MCP Resources             │
+│  • Read: project_state resource         │
+│  • Read: task_queue resource            │
+│  • Read: user_input_queue resource      │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
+│  CLAUDE CODE: Generate Summary          │
+│  • Natural language status              │
+│  • Active tasks and progress            │
+│  • Pending questions (if any)           │
+│  • Recent changes                       │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
+│  OPPORTUNISTIC Q&A:                     │
+│  "While you're here, I have 2 questions"│
+│  • Show pending questions from queue    │
 │  • User can answer or defer             │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-          ┌──────────┐
-          │  REPEAT  │
-          └──────────┘
+└─────────────────────────────────────────┘
 ```
 
-### Loop Lifecycle Management
+**Benefits**:
+- Simple slash command interface (no separate chat loop)
+- MCP resources provide all necessary state
+- Native Claude Code conversation for Q&A
+- No additional infrastructure needed
 
-**Startup Sequence**:
+### Implementation Components Table
 
-```python
-def startup():
-    # ALWAYS start Loop 1 (Work Execution)
-    start_loop('loop_1', WorkExecutionLoop, always_running=True)
+This table shows which components are Claude Code native vs. implemented via MCP server:
 
-    # Register triggers for on-demand loops
-    register_trigger('loop_6', InterruptionLoop, trigger_type='on_demand')
-    register_trigger('loop_7', VettingLoop, trigger_type='on_demand')
+| Component | Implementation | Claude Code Native? | MCP Involvement |
+|-----------|----------------|---------------------|-----------------|
+| Context Pruning | `before_compact` hook + MCP tool | Hook: Yes, Logic: No | `continuous_prune()` tool |
+| QC Review | Skill + hook | Skill framework: Yes | `submit_for_qc()` tool |
+| Priority Scoring | MCP tool | No | `score_priority()` tool |
+| Task Queue | MCP resource | No | `task_queue` resource |
+| User Questions | Native tool | Yes | MCP stores history only |
+| Git Operations | Bash tool + hooks | Bash: Yes, Hooks: Yes | State tracking only |
+| Plugin Catalog | MCP resource | No | `plugin_catalog` resource |
+| Plugin Discovery | Skill | Skill framework: Yes | MCP provides data |
+| User Chat | Slash command | Yes | MCP provides state data |
+| Workstream Mgmt | Bash + MCP | Bash: Yes | State persistence |
 
-    # Register triggers for request-intake loops
-    register_trigger('loop_2', ContextManagementLoop,
-                    trigger_fn=check_context_threshold)
-    register_trigger('loop_4', PrioritizationLoop,
-                    trigger_fn=check_scheduling_needs)
-    register_trigger('loop_5', PluginDiscoveryLoop,
-                    trigger_fn=check_plugin_discovery_needs)
-    register_trigger('loop_8', UserChatLoop,
-                    trigger_fn=check_user_chat_request)
-```
-
-**Shutdown Sequence**:
-
-```python
-def shutdown():
-    # Flash save all loops (emergency checkpoint)
-    for loop_id, loop_info in active_loops.items():
-        loop_info['coordinator'].emergency_checkpoint()
-
-    # Stop non-essential loops first
-    for loop_id, loop_info in active_loops.items():
-        if not loop_info['always_running']:
-            loop_info['loop'].stop()
-
-    # Finally stop Loop 1
-    active_loops['loop_1']['loop'].stop()
-```
+**Key Principle**: Maximize use of Claude Code native features, minimize custom infrastructure.
 
 ---
 
@@ -1127,6 +991,16 @@ Escalate to User (P0):
 
 ## Database Schemas
 
+### Architecture Note
+
+**SQLite database is managed by the MCP server**, not a separate Python process. The codeframe-coordinator MCP server:
+- Maintains single SQLite database
+- Exposes database state via MCP tools and resources
+- Handles all persistence operations
+- Provides transactional safety
+
+No separate database process or connection pool needed - MCP server handles all database interactions.
+
 ### Core Tables
 
 ```sql
@@ -1539,53 +1413,51 @@ project.restore_from_checkpoint(checkpoint_id="ckpt_123")
 
 ### Must-Have Features
 
-**✅ Core Loops:**
-- Loop 1 (Work Execution) - fully functional
-- Loop 2 (Context Management) - basic tiering
-- Loop 4 (Prioritization) - P0/P1/P2/P3 scoring
-- Loop 6 (Interruption) - basic autonomy scoring
-- Loop 8 (User Chat) - "peek in" interface
+**✅ Hooks System:**
+- `before_compact.js` - context pruning trigger
+- `after_tool_use.js` - QC review trigger
+- `user_prompt_submit.js` - priority scoring trigger
+- Hook infrastructure and registration
 
-**✅ Agent System:**
-- Worker → QC → Coordinator workflow
-- Workstream isolation (git branches)
-- Internal PR system
-- Timeout detection
+**✅ MCP Server (codeframe-coordinator):**
+- SQLite database management
+- Tools: `continuous_prune()`, `get_next_task()`, `submit_for_qc()`, `score_priority()`
+- Resources: `project_state`, `task_queue`, `plugin_catalog`, `user_input_queue`
+- Single MCP server handles all state
+
+**✅ Skills:**
+- `/qc-review` - code quality gate
+- `/chat` - project status interface
+- `/plugin-discover` - context-aware recommendations
+- `/plugin-vet` - approval workflow (manual in Phase I)
 
 **✅ Plugin System:**
-- Plugin manifest format
-- CLI installation (global/project scope)
+- Plugin manifest format (`plugin.json`)
+- Slash commands: `/plugin-install`, `/plugin-search`, `/plugin-list`
 - Single official marketplace source
 - 5 initial curated plugins
 
-**✅ QC System:**
-- QC rubric proposal/approval
-- Quantitative + qualitative checks
-- Coordinator veto power
-
-**✅ Persistence:**
-- Flash save (object serialization)
-- Recovery from checkpoint
-- Database state management
-
-**✅ Notifications:**
-- Twilio SMS
-- Email (SMTP)
-- Basic n8n/Zapier webhook
+**✅ Agent System:**
+- Worker → QC → Coordinator workflow
+- Workstream isolation (git branches via Bash tool)
+- Internal PR system (database-tracked)
+- State managed by MCP
 
 **✅ User Interaction:**
-- Unified question queue
-- Claude Code AskUserQuestion integration
-- P0/P1/P2/P3 routing
+- Native `AskUserQuestion` tool
+- MCP resource for question queue
+- P0/P1/P2/P3 routing via `score_priority()`
+- Slash commands for all user operations
 
 ### Deferred to Phase II/III
 
 **🔮 Phase II:**
+- Multiple Claude Code instances (multi-agent coordination)
 - Federated marketplace (multiple sources)
 - User-submitted marketplaces
 - Plugin dependency resolution (transitive)
 - Web UI dashboard
-- Badge/gamification system
+- Notification channels (Twilio SMS, email, webhooks)
 
 **🔮 Phase III:**
 - Automated vetting pipeline
@@ -1594,57 +1466,74 @@ project.restore_from_checkpoint(checkpoint_id="ckpt_123")
 - ML-based autonomy scoring
 - User preference learning
 
-### Research Items (Phase I)
+### Key Architectural Decisions
 
-**⏳ Context Management Research:**
-- Evaluate: SQLite vs. Redis vs. Filesystem vs. In-memory
-- Goal: <10ms plugin metadata lookup
-- Decision criteria: Speed + effectiveness
-- Deliverable: Recommendation document
+**✅ Single Instance (Phase I)**:
+- One Claude Code instance with hooks and MCP
+- Simpler architecture, easier to debug
+- Proves the concept before scaling
+
+**✅ Hooks Over Loops**:
+- No concurrent Python processes
+- Leverage Claude Code's execution flow
+- Less complexity, more reliability
+
+**✅ MCP for State**:
+- Single source of truth
+- No inter-process communication needed
+- Standard MCP protocol
+
+**✅ Context-Pruning-Lab Separation**:
+- Algorithm development in separate repo
+- Enables experimentation without affecting main system
+- Clean integration boundary
 
 ---
 
 ## Implementation Roadmap
 
-### Week 1-2: Foundation
+### Week 1-2: MCP Server Foundation + Hooks
 
 **Objectives:**
-- Database schema implementation
-- Persistence manager (flash save)
-- Base loop class with recovery
-- Loop coordinator pattern
+- codeframe-coordinator MCP server scaffold
+- SQLite database schema implementation
+- Hook system infrastructure (before_compact, after_tool_use, user_prompt_submit)
+- Basic MCP tools and resources
 
 **Deliverables:**
-- SQLite database created with all tables
-- `PersistenceManager` class functional
-- `BaseLoop` and `LoopCoordinator` base classes
-- Unit tests for serialization/deserialization
+- MCP server with SQLite database (all tables)
+- Hooks registered and functional
+- MCP tools: `get_next_task()`, `submit_for_qc()`, `score_priority()`
+- MCP resources: `project_state`, `task_queue`
+- Unit tests for MCP server
 
-### Week 3-4: Core Loops
+### Week 3-4: Skills (QC, Prioritization)
 
 **Objectives:**
-- Loop 1 (Work Execution) - basic workflow
-- Workstream isolation (git branch model)
-- Internal PR system
-- Basic QC rubric system
+- `/qc-review` skill implementation
+- Integration with `after_tool_use` hook
+- Priority scoring logic in MCP
+- Workstream management (git branches via Bash)
 
 **Deliverables:**
-- Loop 1 running end-to-end (worker → QC → coordinator)
-- Workstream creation/cleanup functional
-- Internal PR tracked in database
+- `/qc-review` skill functional (worker → QC workflow)
+- Automatic QC trigger after git commits
+- `score_priority()` with P0 pattern database
+- Workstream creation/cleanup via Bash + MCP state tracking
 - Sample QC rubric implemented
 
-### Week 5-6: Plugin System
+### Week 5-6: Plugin System (Slash Commands)
 
 **Objectives:**
 - Plugin manifest parser
-- CLI commands (search, install, uninstall, list, info)
-- Plugin catalog database
+- Slash commands: `/plugin-install`, `/plugin-search`, `/plugin-list`, `/plugin-info`
+- MCP resource: `plugin_catalog`
 - 5 initial plugins created
 
 **Deliverables:**
 - `plugin.json` manifest spec finalized
-- CLI commands functional
+- Slash commands functional
+- Plugin catalog in MCP resource
 - 5 plugins:
   - code-reviewer-qc
   - security-scanner
@@ -1652,35 +1541,34 @@ project.restore_from_checkpoint(checkpoint_id="ckpt_123")
   - documentation-generator
   - architecture-advisor
 
-### Week 7-8: User Interaction & Loops
+### Week 7-8: Integration Testing
 
 **Objectives:**
-- Loop 4 (Prioritization)
-- Loop 6 (Interruption) with autonomy scoring
-- Loop 8 (User Chat)
-- Unified question queue
-- Notification system (Twilio, Email)
+- End-to-end workflow testing
+- `/chat` command implementation
+- `/plugin-discover` skill
+- Hook integration refinement
 
 **Deliverables:**
-- P0/P1/P2/P3 prioritization functional
-- Autonomy scoring with P0 pattern database
-- Chat interface ("peek in")
-- SMS + Email notifications working
-
-### Week 9-10: Polish & Testing
-
-**Objectives:**
-- Loop 2 (Context Management) - basic tiering
-- Retry → Debug pattern
-- Integration testing
-- Documentation
+- Full workflow: task → work → QC → merge tested
+- `/chat` command shows project status
+- Plugin discovery based on workflow phase
+- Integration test suite
 - Bug fixes
 
+### Week 9-10: Context Pruning + Polish
+
+**Objectives:**
+- `before_compact` hook + `continuous_prune()` MCP tool
+- Integration with context-pruning-lab algorithm
+- Documentation
+- Final testing and bug fixes
+
 **Deliverables:**
-- Context tiering functional (hot/warm/cold)
-- Smart retry with debug escalation
-- Integration test suite
-- User documentation (README, guides)
+- Continuous context pruning functional
+- Algorithm from context-pruning-lab integrated
+- User documentation (README, guides, CLAUDE.md)
+- Developer documentation for extending system
 - Phase I MVP ready for launch
 
 ### Post-Launch: Phase II Planning
@@ -1688,8 +1576,9 @@ project.restore_from_checkpoint(checkpoint_id="ckpt_123")
 **Objectives:**
 - Gather user feedback
 - Prioritize Phase II features
+- Research multi-instance coordination patterns
 - Begin federated marketplace design
-- Research automated vetting approaches
+- Explore automated vetting approaches
 
 ---
 
@@ -1743,11 +1632,19 @@ project.restore_from_checkpoint(checkpoint_id="ckpt_123")
 
 ## Document Status
 
-**Version**: 1.0
-**Status**: Draft for Phase I Implementation
-**Next Review**: After Week 2 (Foundation Complete)
+**Version**: 2.0
+**Status**: Updated for Claude Code Native Architecture
+**Next Review**: After Week 2 (MCP Server + Hooks Complete)
 
 **Changelog**:
+- 2025-10-29: Major refactor to Claude Code native architecture
+  - Replaced 8 concurrent Python loops with hooks + MCP server
+  - Single MCP server (codeframe-coordinator) manages all state
+  - Hooks system for interception points (before_compact, after_tool_use, etc.)
+  - Skills framework for behavioral patterns
+  - Slash commands for user interface
+  - Referenced context-pruning-lab for algorithm development
+  - Updated implementation roadmap to reflect new architecture
 - 2025-01-29: Initial specification based on Socratic discovery process
 
 ---
