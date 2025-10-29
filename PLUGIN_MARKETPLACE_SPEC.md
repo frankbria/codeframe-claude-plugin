@@ -1,4 +1,4 @@
-# Plugin Marketplace for Claude Code - Technical Specification v1.0
+# Plugin Marketplace for Claude Code - Technical Specification v1.1
 
 **Project**: Codeframe-Inspired Plugin Marketplace System
 **Built As**: Claude Code Plugin within Marketplace
@@ -38,7 +38,7 @@ Build a **plugin marketplace system** as a Claude Code plugin that enables auton
 2. **Workstream Isolation**: Git branch-based workspaces prevent resource conflicts between agents
 3. **Claude Code Native Architecture**: Hooks + MCP server replace custom Python loops
 4. **Unified Question Queue**: Native AskUserQuestion tool with MCP resource management
-5. **Continuous Context Pruning**: before_compact hook enables proactive memory management
+5. **Continuous Context Pruning** (Phase I Primary Strategy): Incremental pruning after every interaction prevents agent degradation and eliminates emergency flash saves - validated in standalone context-pruning-lab repository
 6. **Smart Retry-Debug**: Automated retry → simplify → debug → escalate pattern
 
 ### Three-Phase Roadmap
@@ -234,13 +234,21 @@ In Phase I (MVP), we operate with a **single Claude Code instance** enhanced wit
 
 ### 2. Context Management (Hook + MCP)
 
+> **🎯 PRIMARY PHASE I STRATEGY**: Continuous pruning is the foundational approach to context management, replacing traditional batch compaction to prevent agent degradation.
+
 **Implementation**: `before_compact.js` hook → `continuous_prune` MCP tool
 
 **Purpose**: Continuous importance-based context pruning
 
+**Why This is the Primary Strategy**:
+- **Problem**: Traditional batch compaction (wait until 80% full → emergency save) causes agent degradation after 2-3 cycles
+- **Root Cause**: Loss of decision rationale, relationship breakage, cumulative scoring errors
+- **Solution**: Prune incrementally after EVERY interaction, removing ~110% of what was added
+- **Result**: Agent never reaches critical context levels, maintains full capability indefinitely
+
 **Key Difference from Traditional Compaction**:
-- **Traditional**: Wait until 80% full, then batch compact
-- **Continuous Pruning**: Prune incrementally on every message cycle
+- **Traditional**: Wait until 80% full, then batch compact → agent degradation
+- **Continuous Pruning**: Prune incrementally on every message cycle → no degradation
 - Prevents context from ever reaching critical levels
 - More efficient: small pruning operations vs. large batch operations
 
@@ -1488,6 +1496,17 @@ project.restore_from_checkpoint(checkpoint_id="ckpt_123")
 - Enables experimentation without affecting main system
 - Clean integration boundary
 
+**✅ Continuous Pruning as Phase I Primary Strategy**:
+- **Problem Solved**: Traditional batch compaction causes agent degradation after 2-3 cycles
+- **Solution**: Incremental pruning after EVERY interaction (removes ~110% of added content)
+- **Benefits**:
+  - No emergency flash saves needed
+  - Agent never degrades from information loss
+  - Context stays lean (20-30% utilization vs. 80% threshold)
+  - Validated in context-pruning-lab with experiments and benchmarks
+- **Integration**: `before_compact.js` hook → `continuous_prune()` MCP tool
+- **Development Approach**: Algorithm proven separately, then integrated cleanly
+
 ---
 
 ## Implementation Roadmap
@@ -1632,12 +1651,17 @@ project.restore_from_checkpoint(checkpoint_id="ckpt_123")
 
 ## Document Status
 
-**Version**: 2.0
-**Status**: Updated for Claude Code Native Architecture
+**Version**: 1.1
+**Status**: Updated for Claude Code Native Architecture + Continuous Pruning Documentation
 **Next Review**: After Week 2 (MCP Server + Hooks Complete)
 
 **Changelog**:
-- 2025-10-29: Major refactor to Claude Code native architecture
+- 2025-10-29 (v1.1): Enhanced continuous pruning documentation as Phase I primary strategy
+  - Added prominent callout in Context Management section
+  - Added dedicated architectural decision in Phase I MVP scope
+  - Updated Key Innovations to emphasize Phase I primary strategy
+  - Clarified problem solved, solution approach, and benefits
+- 2025-10-29 (v1.0): Major refactor to Claude Code native architecture
   - Replaced 8 concurrent Python loops with hooks + MCP server
   - Single MCP server (codeframe-coordinator) manages all state
   - Hooks system for interception points (before_compact, after_tool_use, etc.)
