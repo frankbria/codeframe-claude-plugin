@@ -198,6 +198,11 @@ The system operates through **8 independent concurrent loops**, each with its ow
 **Trigger**: Context window >80% full
 **Purpose**: Importance-based compaction and tiering
 
+**IMPORTANT DISTINCTION**:
+- **Flash Save** = Emergency backup of FULL context (120K+ tokens) → Only used for crash recovery
+- **Compaction** = Selective reload with ONLY HOT tier (~20-30% of original context)
+- **New conversation starts at ~20-30% capacity, NOT 80%**
+
 ```
 ┌─────────────────────────────────────────┐
 │  TRIGGER: Context >80% Full             │
@@ -205,10 +210,12 @@ The system operates through **8 independent concurrent loops**, each with its ow
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│  FLASH SAVE: Checkpoint Before Compact  │
-│  • Save conversation state              │
+│  FLASH SAVE: Emergency Backup ONLY      │
+│  • Save FULL conversation (120K tokens) │
 │  • Git commit current work              │
 │  • DB snapshot                          │
+│  • NOT restored in normal operation     │
+│  • Only for crash recovery              │
 └────────────────┬────────────────────────┘
                  │
                  ▼
@@ -230,11 +237,12 @@ The system operates through **8 independent concurrent loops**, each with its ow
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│  COMPACTION: Rebuild Context            │
-│  • Load only HOT tier                   │
-│  • Index WARM tier                      │
-│  • Archive COLD tier                    │
-│  • Restart agent conversation           │
+│  COMPACTION: Start NEW Conversation     │
+│  • Load ONLY HOT tier (~40K tokens)    │
+│  • Archive WARM tier to DB (queryable) │
+│  • Archive COLD tier to filesystem     │
+│  • Start fresh conversation at ~27%    │
+│  • 73% capacity available for growth   │
 └────────────────┬────────────────────────┘
                  │
                  ▼
@@ -242,6 +250,127 @@ The system operates through **8 independent concurrent loops**, each with its ow
           │  RESUME  │
           └──────────┘
 ```
+
+### Compaction Example: Token Counts
+
+This example demonstrates the context reduction process when compaction is triggered at 80% capacity (assuming a 150K token limit).
+
+**Before Compaction (80% full - 120,000 tokens):**
+
+| Context Item | Tokens | Importance Score | Tier Assignment |
+|-------------|--------|------------------|-----------------|
+| Current task spec | 10,000 | 0.95 | HOT (stays in context) |
+| Active files (3) | 20,000 | 0.90 | HOT (stays in context) |
+| Recent test results | 10,000 | 0.85 | HOT (stays in context) |
+| Related files (10) | 30,000 | 0.60 | WARM (archived to DB) |
+| Old test results | 30,000 | 0.30 | COLD (archived to filesystem) |
+| Completed tasks | 20,000 | 0.20 | COLD (archived to filesystem) |
+| **TOTAL** | **120,000** | - | - |
+
+**After Compaction (27% full - 40,000 tokens):**
+
+| Context Item | Tokens | Status | Location |
+|-------------|--------|--------|----------|
+| Current task spec | 10,000 | ✅ Loaded | New conversation |
+| Active files (3) | 20,000 | ✅ Loaded | New conversation |
+| Recent test results | 10,000 | ✅ Loaded | New conversation |
+| Related files (10) | 30,000 | 📊 Queryable | Database (loaded on-demand) |
+| Old test results | 30,000 | 📁 Archived | Filesystem (rarely accessed) |
+| Completed tasks | 20,000 | 📁 Archived | Filesystem (rarely accessed) |
+| **HOT TIER TOTAL** | **40,000** | - | **In active context** |
+| **WARM TIER TOTAL** | **30,000** | - | **Available via DB query** |
+| **COLD TIER TOTAL** | **50,000** | - | **Long-term storage** |
+
+**Result**: Context reduced from 120K (80%) to 40K (27%), leaving **73% capacity available** for new work.
+
+**Hot Tier Selection Algorithm:**
+
+```python
+def select_hot_tier(context_items: List[ContextItem],
+                    target_tokens: int = 40000) -> List[ContextItem]:
+    """
+    Select the most important context items to keep in active memory.
+
+    Args:
+        context_items: All items in current context
+        target_tokens: Target token count for HOT tier (~25-30% of max)
+
+    Returns:
+        List of items to keep in HOT tier
+    """
+    # Calculate importance scores for all items
+    for item in context_items:
+        item.importance_score = calculate_importance(item)
+
+    # Sort by importance (descending)
+    sorted_items = sorted(context_items,
+                         key=lambda x: x.importance_score,
+                         reverse=True)
+
+    # Select items until target token count reached
+    hot_tier = []
+    current_tokens = 0
+
+    for item in sorted_items:
+        if current_tokens + item.token_count <= target_tokens:
+            hot_tier.append(item)
+            current_tokens += item.token_count
+        else:
+            # Token budget exceeded - remaining items go to WARM/COLD
+            break
+
+    return hot_tier
+
+def calculate_importance(item: ContextItem) -> float:
+    """
+    Calculate importance score (0.0-1.0) based on multiple factors.
+
+    Score components:
+    - Recency: More recent = higher score (0.0-0.4)
+    - Access frequency: More accesses = higher score (0.0-0.3)
+    - Type weight: Some types inherently more important (0.0-0.3)
+    """
+    # Recency score (exponential decay)
+    age_hours = (datetime.now() - item.last_accessed).total_seconds() / 3600
+    recency_score = 0.4 * math.exp(-age_hours / 24)  # Half-life: 24 hours
+
+    # Access frequency score (logarithmic)
+    frequency_score = 0.3 * min(1.0, math.log(item.access_count + 1) / 5)
+
+    # Type weight score
+    type_weights = {
+        'current_task': 0.30,      # Always highest priority
+        'active_file': 0.25,       # Currently editing
+        'test_result': 0.20,       # Recent test output
+        'completed_task': 0.05,    # Historical only
+        'dependency': 0.15,        # Related files
+        'documentation': 0.10      # Reference material
+    }
+    type_score = type_weights.get(item.type, 0.10)
+
+    # Combine scores
+    total_score = recency_score + frequency_score + type_score
+    return min(1.0, total_score)  # Cap at 1.0
+```
+
+**Tier Thresholds:**
+- **HOT (0.8-1.0)**: Must stay in active context for immediate access
+- **WARM (0.4-0.8)**: Important but can be loaded on-demand from database
+- **COLD (0.0-0.4)**: Historical data, archived to filesystem, rarely needed
+
+**WARM Tier Access Pattern:**
+When an agent needs WARM tier data, the system:
+1. Queries database for specific items by ID or pattern
+2. Loads requested items into temporary context
+3. Updates access count and recency (may promote to HOT on next compaction)
+4. Removes from context after task completion
+
+**COLD Tier Access Pattern:**
+COLD tier data is typically only accessed for:
+- Historical analysis requests
+- Debugging old issues
+- Compliance/audit requirements
+- Manual user requests
 
 ### Loop 4: Prioritization & Scheduling (Request Intake)
 
